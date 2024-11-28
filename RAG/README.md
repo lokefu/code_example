@@ -1,5 +1,5 @@
 # Background
-1. RCP-37 (National Park Biodiversity, Chatbot for animals' information)
+1. Singapore National Park Biodiversity, Chatbot for animals' information
 2. A demo for RAG + LLM
 3. Framework: Langchain
 4. Text encoder/Embedding model:
