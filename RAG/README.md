@@ -1,5 +1,5 @@
 # Background
-1. Singapore National Park Biodiversity, Chatbot for animals' information
+1. RCP-37 (National Park Biodiversity, Chatbot for animals' information)
 2. A demo for RAG + LLM
 3. Framework: Langchain
 4. Text encoder/Embedding model:
@@ -33,6 +33,7 @@ Put everything in the same path.
     ├── data.json               # reformatted data
     ├── animal_data.json        # data from web  
     ├── dropdown.pkl            # data for dropdown
+    ├── animal_list.pkl         # data for animal list
     ├── demo.py
     ├── requirements.txt
     └── README.md
@@ -49,6 +50,8 @@ Put everything in the same path.
 
         snapshot_download(repo_id="mistralai/Mistral-7B-Instruct-v0.3", allow_patterns=["params.json", "consolidated.safetensors", "tokenizer.model.v3"], local_dir=mistral_models_path)
 
+## Run
+python3 demo.py
 
 # Remarks
 1. Will add the dropdown into demo later.

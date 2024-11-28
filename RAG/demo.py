@@ -13,6 +13,7 @@ from mistral_common.protocol.instruct.messages import UserMessage
 from mistral_common.protocol.instruct.request import ChatCompletionRequest
 import pickle
 import re
+from langchain_core.documents import Document
 
 ######## RAG ########
 file_path='data.json'
@@ -34,6 +35,21 @@ retriever3 = db3.as_retriever(search_type='mmr', search_kwargs={"k": 2})
 # initialize the ensemble retriever
 ensemble_retriever = EnsembleRetriever(retrievers=[retriever1, retriever2, retriever3])
 
+# animal list doc
+with open('animal_list.pkl', 'rb') as f:
+    animal_list = pickle.load(f)
+animal_sum = {'the list of animals:': str(animal_list)}
+#splitter = RecursiveJsonSplitter()#max_chunk_size=300)
+#documents = splitter.create_documents(texts=[animal_sum])
+
+#testdb = FAISS.from_documents(documents, HuggingFaceEmbeddings(model_name="jinaai/jina-embeddings-v3",
+                                       #model_kwargs={'trust_remote_code': True}))
+#testretriever = testdb.as_retriever(search_type='mmr', search_kwargs={"k": 1})
+#animal_list_doc = testretriever.invoke('') #a list
+document = Document(page_content=f'{animal_sum}',metadata={})
+animal_list_doc = [document]
+
+# llm model
 mistral_models_path = ('mistral')
 tokenizer = MistralTokenizer.from_file(f"{mistral_models_path}/tokenizer.model.v3")
 model = Transformer.from_folder(mistral_models_path)
@@ -47,6 +63,24 @@ def llm(input):
 
 def decode_unicode_escape(text):
     return text.encode().decode('unicode_escape')
+
+def decode(text):
+    #extract_unicode_escape
+    escaped_sequences = []
+    i = 0
+    while i < len(text):
+        if text[i:i+2] == '\\u':
+            end_index = text.find('"', i + 2)
+            if end_index != -1:
+                escaped_sequences.append(text[i:end_index])
+                i = end_index
+            else:
+                break
+        else:
+            i += 1
+    for i in escaped_sequences:
+        text = text.replace(i, decode_unicode_escape(i))
+    return text #escaped_sequences, text
 
 RAG_TEMPLATE = """
 You are an assistant for question-answering tasks. Answer the following question based only on the provided context.
@@ -66,7 +100,9 @@ def format_docs(docs):
 
 def rag(message):
     doc = ensemble_retriever.invoke(message)
-    context = format_docs(doc)
+    doc_copy = doc.copy()
+    doc_copy.append(animal_list_doc[0])
+    context = format_docs(doc_copy)
     prompt = RAG_TEMPLATE.format(context=context, question=message)
     answer = llm(prompt)
     
@@ -207,7 +243,7 @@ with gr.Blocks() as demo:
     def respond(message, chat_history):
         llm_response = rag(message)
         answer, context = llm_response[0], llm_response[1]
-        bot_message = decode_unicode_escape(answer)
+        bot_message = decode(answer) #decode_unicode_escape(answer)
         
         chat_history.append({"role": "user", "content": message})
         chat_history.append({"role": "assistant", "content": bot_message})
@@ -245,17 +281,20 @@ with gr.Blocks() as demo:
     gr.Markdown(
         """
         ## Your question here
-        Type a question or select the species -> sub-species -> animal from the Animal Examples below.
+        Type a question or select the species -> sub-species -> animal from the Animal Selection below.
+        Some examples questions are also provided in the Example Questions below.
+        
+        Remember to click the Submit button or press 'Enter' to get the answer, even if you have selected below.
         """)
     msg = gr.Textbox(label = 'Question here', placeholder = "tell me about Manthey's Chorus Frog")
     submit_btn = gr.Button("Submit")
     
     
     ### Select the animal
-    with gr.Accordion("Animal Examples", open=False):
+    with gr.Accordion("Animal Selection", open=False):
         gr.Markdown(
             """   
-            Your selected choice will be only updated in Question here box above after you choose the animal, so please select question if need at first.
+            Your selected choice will be only updated in [Question here] box above after you choose the animal, so please select question if need at first.
             You can still edit the question manually after selecting the animal.
             """)
         questions = gr.Dropdown(["", "tell me about ", "what is the habit of "], value='', label="Questions", info="You could skip if you don't want")
@@ -266,6 +305,22 @@ with gr.Blocks() as demo:
         #animal
         animal = gr.Dropdown(value=None, label="Animals", visible=True, info="You can ask questions about animals")
 
+    ### questions examples
+    with gr.Accordion("Example Questions", open=False):
+        gr.Markdown(
+            """
+            Your selected example question will be updated in the [Question here] box above.
+            Specific questions towards the animal will be answered fast, while answering generic questions takes more time.
+            """
+            )
+        examples = gr.Examples(examples = [["tell me about Crab-eating Frog"],
+                                ["what is the habit of Obelisk Creeper Snail"],
+                                ["chinese name of little grebe"], 
+                                ["tamil name of Javan Myna"],
+                                ["website link of Grey Sailor"],
+                                ["image link of Chinese Egret"],
+                                ["tell me some species of birds in singapore"]], label="Examples", inputs = msg)
+    
     def select_sub(species):
         return gr.Dropdown(sub_dict[species], interactive=True)
     def select_animal(sub):
