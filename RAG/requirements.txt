@@ -1,0 +1,10 @@
+mistral_inference
+langchain-community
+langchain-huggingface
+gradio==4.44.1
+numpy==1.23.2
+ipywidgets
+faiss-cpu
+faiss-gpu
+einops
+rank_bm25
