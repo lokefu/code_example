@@ -1,3 +1,6 @@
+## Background
+Computer vision: Object detection in video via frame differencing
+
 ## Environment
 python 3.9.2
 
