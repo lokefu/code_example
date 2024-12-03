@@ -1,6 +1,6 @@
 # Background
 1. Singapore National Park Biodiversity, Chatbot for animals' information
-2. A demo for RAG + LLM
+2. RAG + LLM
 3. Framework: Langchain
 4. Text encoder/Embedding model:
 
