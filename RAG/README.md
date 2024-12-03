@@ -38,7 +38,7 @@ Put everything in the same path.
     ├── requirements.txt
     └── README.md
 
-1. All except mistral folder are in github.
+1. All except mistral folder are in github. The image folder is not provided.
 2. To download the mistral: 1) https://drive.google.com/drive/folders/1OaPUWUSG4OPRYOBzNY01Tx57C8CIkFZ9?usp=sharing; 2) use code below. (If you want to change the folder path of model, remember to change it too in the demo.py - mistral_models_path = ('path_to_model'))
 
         from huggingface_hub import snapshot_download
