@@ -30,7 +30,7 @@ Put everything in the same path.
     └── README.md
 
 ## Run
-    python3 demo.py
+    python3 name.py
 
 ## Outputs
 `name.pkl` will be outputed if running `name.py`.
