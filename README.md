@@ -1,6 +1,6 @@
 # code examples
 
-  - table_ocr: table recognition + OCR
+  - table_ocr: table recognition + OCR from PDF/Image
 
   - PDF: information (text, table, ...) extraction from PDF
 
