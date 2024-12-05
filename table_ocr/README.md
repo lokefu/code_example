@@ -30,7 +30,7 @@ Put everything in the same path.
     └── README.md
 
 ## Outputs
-'name.pkl' will be outputed if running 'name.py'.
+`name.pkl` will be outputed if running `name.py`.
 
 To load result:
 
