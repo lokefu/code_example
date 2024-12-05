@@ -348,5 +348,5 @@ with gr.Blocks() as demo:
     msg.submit(respond, [msg, chatbot], [msg, chatbot])#, name, web])
     submit_btn.click(respond, [msg, chatbot], [msg, chatbot])#, name, web])
     
-#demo.launch(share=True)
-demo.launch(share=True, share_server_address="ai-demo.tictag.io:7000")
+demo.launch(share=True)
+#demo.launch(share=True, share_server_address="")
