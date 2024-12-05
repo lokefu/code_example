@@ -29,6 +29,9 @@ Put everything in the same path.
     ├── requirements.txt
     └── README.md
 
+## Run
+    python3 demo.py
+
 ## Outputs
 `name.pkl` will be outputed if running `name.py`.
 
