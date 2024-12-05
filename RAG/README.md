@@ -24,7 +24,7 @@ if in jupyter:
 
     pip install ipykernel
 
-## Datas
+## Files
 Put everything in the same path.
 
     .
