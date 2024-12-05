@@ -1,8 +1,7 @@
 # Background
 1. Table recognition and OCR from PDF
-2. Table location (page) by keyword match via RAG database
+2. Table location (page) by keyword match via RAG database in Langchain
 3. Table recognition (in each page) and OCR by pymupdf library
-3. Framework: Langchain
 
 
 # Set-up
