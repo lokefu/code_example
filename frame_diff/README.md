@@ -1,5 +1,9 @@
 ## Background
-Computer vision: Object detection in video via Background Substraction (frame differencing)
+Computer vision: Object detection in video via Background Substraction (frame differencing)\
+
+## Demo
+A demo GIF:
+        https://drive.google.com/file/d/1iofc5V-FQ7Lj1YB2JhRxLBbjfhZ7O7IQ/view?usp=drive_link
 
 ## Environment
 python 3.9.2
