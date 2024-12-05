@@ -1,7 +1,9 @@
 # code examples
 
-  -PDF
+table_ocr: table recognition
 
-RAG
+PDF: information (text, table, ...) extraction from PDF
 
-frame_diff
+RAG: chatbot based on existing data via RAG + LLM
+
+frame_diff: video object detection via frame differencing
