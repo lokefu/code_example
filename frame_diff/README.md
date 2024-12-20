@@ -1,19 +1,30 @@
 ## Background
-Computer vision: Object detection in video via Background Substraction (frame differencing)\
-
-## Demo
-A demo GIF:
-        https://drive.google.com/file/d/1iofc5V-FQ7Lj1YB2JhRxLBbjfhZ7O7IQ/view?usp=drive_link
+Computer vision: Object detection in video via frame differencing
 
 ## Environment
 python 3.9.2
 
-Use conda virtual envionment, no specific requirements for libraries' versions.
+pip install -r requirements.txt
 
 ## Run
 Locate in the script at first.
 
+Background Subtraction:
+
         python3 frame_diff_back.py --output_file test.csv --thresh 400 --video_path highway_cut.mp4
+
+Frame Differencing:
+
+        python3 frame_diff.py --output_file test.csv --thresh 1000 --video_path highway_cut.mp4
+
+
+## General Notes for Frame Diff
+For now, the method is based on Frame Diff, and the performace varies a lot on different videos. I suggest we see how it really performs on drill bit. The CNN trick to filter background noise out may not be a good approach, as no such pre-trained weights are avaiable for drill bit actually.
+
+What we could do is 1) further locate certain regions of the video frames; 2) find a optimal threshold (box size & IOU) of the drill bit video.
+
+Run the frame_diff.py, a visualized GIF will be created.
+
 
 ## Input
 Three inputs, 2 optional: thresh, output_file ; 1 require: video_path
