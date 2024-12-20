@@ -28,6 +28,7 @@ Put everything in the same path.
     ├── mistral                 # mistral LLM model folder 
     ├── result.pkl              # LLM sample response
     ├── data.pdf                # PDF
+    ├── demo.py                 # a demo built for data.pdf
     ├── test.ipynb
     ├── requirements.txt
     └── README.md
