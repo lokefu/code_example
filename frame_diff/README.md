@@ -17,15 +17,6 @@ Frame Differencing:
 
         python3 frame_diff.py --output_file test.csv --thresh 1000 --video_path highway_cut.mp4
 
-
-## General Notes for Frame Diff
-For now, the method is based on Frame Diff, and the performace varies a lot on different videos. I suggest we see how it really performs on drill bit. The CNN trick to filter background noise out may not be a good approach, as no such pre-trained weights are avaiable for drill bit actually.
-
-What we could do is 1) further locate certain regions of the video frames; 2) find a optimal threshold (box size & IOU) of the drill bit video.
-
-Run the frame_diff.py, a visualized GIF will be created.
-
-
 ## Input
 Three inputs, 2 optional: thresh, output_file ; 1 require: video_path
 1. '--thresh', type=int, default=400, help='box size lower limit'
