@@ -16,11 +16,11 @@ Put everything in the same path.
     ├── human.ipynb             # human case implementation
     └── README.md
 
-To download the src: [https://drive.google.com/drive/folders/1OaPUWUSG4OPRYOBzNY01Tx57C8CIkFZ9?usp=sharing;](https://drive.google.com/drive/folders/1RCREBK-Hr4m_HnNcfQ5OjloMQJIOEjUv?usp=sharing)
+To download the src: https://drive.google.com/drive/folders/1Y33O9yR-8RIn9Sp1bRkVzA4SCtjoM07I?usp=drive_link
 
 
 # Example Outputs
 
-Drill Bit: https://drive.google.com/drive/folders/1Ss0i8X54Q0aloyYvWm9ex2BwGf0Hryb8?usp=drive_link
+Drill Bit: [https://drive.google.com/drive/folders/1Ss0i8X54Q0aloyYvWm9ex2BwGf0Hryb8?usp=drive_link](https://drive.google.com/drive/folders/1y3-1DFEOjDPO-K0jDc3BDfNTHadUHbV7?usp=drive_link)
 
-Human: https://drive.google.com/drive/folders/1uKcU9_uyxSxWSsiR50KJg0bmQyE74ych?usp=drive_link
+Human: [https://drive.google.com/drive/folders/1uKcU9_uyxSxWSsiR50KJg0bmQyE74ych?usp=drive_link](https://drive.google.com/drive/folders/1yYZeaoeznDZuNt8pnrioZJqvERn-c9gU?usp=drive_link)
