@@ -1,6 +1,6 @@
 # Background
 
-Three cases for applying frame differeing onto: Drill Bits, Human and Clock.
+Three cases for applying frame differeing onto: Drill Bits, Human and Clock (detect large and small at the same time).
 
 Use the same environment as frame_diff.
 
