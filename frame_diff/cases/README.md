@@ -26,3 +26,5 @@ To download the src: https://drive.google.com/drive/folders/1Y33O9yR-8RIn9Sp1bRk
 Drill Bit: [https://drive.google.com/drive/folders/1Ss0i8X54Q0aloyYvWm9ex2BwGf0Hryb8?usp=drive_link](https://drive.google.com/drive/folders/1y3-1DFEOjDPO-K0jDc3BDfNTHadUHbV7?usp=drive_link)
 
 Human: [https://drive.google.com/drive/folders/1uKcU9_uyxSxWSsiR50KJg0bmQyE74ych?usp=drive_link](https://drive.google.com/drive/folders/1yYZeaoeznDZuNt8pnrioZJqvERn-c9gU?usp=drive_link)
+
+Clock: https://drive.google.com/file/d/1bm2yQNA0mk8RMGPLgbB79nWk0bNOovNW/view?usp=drive_link
