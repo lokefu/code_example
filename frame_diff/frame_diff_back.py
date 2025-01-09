@@ -201,11 +201,7 @@ def get_detections(backSub, frame, bbox_thresh=100, nms_thresh=0.1, kernel=np.ar
     bboxes = detections[:, :4]
     scores = detections[:, -1]
 
-    if bboxes.size > 0:
-        return bboxes
-    else:
-        # perform Non-Maximal Supression on initial detections
-        return non_max_suppression(bboxes, scores, nms_thresh)
+    return non_max_suppression(bboxes, scores, nms_thresh)
   
 kernel=np.array((9,9), dtype=np.uint8)
 

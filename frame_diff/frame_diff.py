@@ -42,6 +42,7 @@ parser = argparse.ArgumentParser(description='inputs')
 parser.add_argument('--thresh', type=int, default=1000, required=False, help='box size lower limit')
 parser.add_argument('--video_path', type=str, default='highway_cut.mp4', required=False, help='video_path end with .mp4')
 parser.add_argument('--output_file', type=str, default='data.csv', required=False, help='box output file ending with csv')
+parser.add_argument('--output_gif', type=str, default='vis.GIF', required=False, help='box output file ending with csv')
 
 # Parse the arguments
 args = parser.parse_args()
@@ -197,11 +198,13 @@ def get_detections(frame1, frame2, bbox_thresh=400, nms_thresh=1e-3, mask_kernel
     bboxes = detections[:, :4]
     scores = detections[:, -1]
     
-    if bboxes.size > 0:
-        return bboxes
-    else:
+    return non_max_suppression(bboxes, scores, nms_thresh)
+    
+    #if bboxes.size > 0:
+        #return bboxes
+    #else:
         # perform Non-Maximal Supression on initial detections
-        return non_max_suppression(bboxes, scores, nms_thresh)
+        #return non_max_suppression(bboxes, scores, nms_thresh)
 
 
   
@@ -293,8 +296,11 @@ import matplotlib.pyplot as plt
 def draw_bboxes(frame, detections):
     for det in detections:
         x1,y1,x2,y2 = det
-        cv2.rectangle(frame, (x1,y1), (x2,y2), (0,255,0), 3)
+        cv2.rectangle(frame, (x1,y1), (x2,y2), (0,255,0), 3) #(0,255,0), 3) green
 
+# Convert BGR to RGB
+def bgr2rgb(img):
+    return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
 def create_gif_from_images(save_path : str, image_path : str, ext : str) -> None:
     ''' creates a GIF from a folder of images
@@ -331,6 +337,9 @@ for idx in range(1, len(image_paths)):
     detections = box_result[idx-1]                           
     # draw bounding boxes on frame
     draw_bboxes(frame_bgr, detections)
+    
+    # Convert BGR to RGB for matplotlib display
+    frame_rgb = bgr2rgb(frame_bgr)
 
     # save image for GIF
     fig = plt.figure(figsize=(15, 7))
@@ -339,7 +348,7 @@ for idx in range(1, len(image_paths)):
     fig.savefig(f"temp/frame_{idx}.png")
     plt.close()
 
-file_path = "vis.GIF"
+file_path = args.output_gif # "vis.GIF"
 
 # Check if the file exists before attempting to delete it
 if os.path.exists(file_path):
@@ -348,6 +357,6 @@ if os.path.exists(file_path):
 else:
     print(f"{file_path} does not exist.")
 
-create_gif_from_images(f"vis.GIF", 'temp', '.png')
+create_gif_from_images(file_path, 'temp', '.png')
 
 #'''
