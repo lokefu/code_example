@@ -198,11 +198,13 @@ def get_detections(frame1, frame2, bbox_thresh=400, nms_thresh=1e-3, mask_kernel
     bboxes = detections[:, :4]
     scores = detections[:, -1]
     
-    if bboxes.size > 0:
-        return bboxes
-    else:
+    return non_max_suppression(bboxes, scores, nms_thresh)
+    
+    #if bboxes.size > 0:
+        #return bboxes
+    #else:
         # perform Non-Maximal Supression on initial detections
-        return non_max_suppression(bboxes, scores, nms_thresh)
+        #return non_max_suppression(bboxes, scores, nms_thresh)
 
 
   
@@ -294,7 +296,7 @@ import matplotlib.pyplot as plt
 def draw_bboxes(frame, detections):
     for det in detections:
         x1,y1,x2,y2 = det
-        cv2.rectangle(frame, (x1,y1), (x2,y2), (0,255,0), 3)
+        cv2.rectangle(frame, (x1,y1), (x2,y2), (0,255,0), 3) #(0,255,0), 3) green
 
 # Convert BGR to RGB
 def bgr2rgb(img):
