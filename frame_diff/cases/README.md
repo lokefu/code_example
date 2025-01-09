@@ -1,6 +1,6 @@
 # Background
 
-Two cases for applying frame differeing onto: Drill Bits and Human.
+Three cases for applying frame differeing onto: Drill Bits, Human and Clock.
 
 Use the same environment as frame_diff.
 
@@ -10,10 +10,12 @@ Put everything in the same path.
 
     .
     ├── frame_diff.py           # frame differencing functions same as frame_diff
-    ├── src                     # video sources of Drill Bits and Human, to be uploaded by yourself
+    ├── utils.py                # packaged frame differencing functions same as frame_diff
+    ├── src                     # video sources, to be uploaded by yourself
     ├── drill.ipynb             # drill bits case implementation (first sample)
     ├── drill2.ipynb            # drill bits case implementation (second sample)
     ├── human.ipynb             # human case implementation
+    ├── clock.ipynb             # clock case implementation
     └── README.md
 
 To download the src: https://drive.google.com/drive/folders/1Y33O9yR-8RIn9Sp1bRkVzA4SCtjoM07I?usp=drive_link
