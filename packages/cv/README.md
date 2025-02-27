@@ -9,7 +9,7 @@ Note: Put cv folder under your code home directory
 # The structure of util functions in CV
 
 1. img_vid.py
-  images to video
+  - images to video
   images to gif
   video to images
 
