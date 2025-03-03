@@ -38,9 +38,9 @@ Put everything in the same path.
 
     single.ipynb
 
-sample input: https://drive.google.com/drive/folders/1gW9BfKYLnrPUUcWsOsCqBqh440DMrnRl?usp=drive_link
+sample input: 
 
-sample output: https://drive.google.com/drive/folders/1LxTQKhU2Mrwp6lzuyLbg9dkpaHy-msH1?usp=drive_link
+sample output: 
 
 ## Outputs
 The output 'GIF' or 'mp4' in 'output' folder.
