@@ -1,3 +1,6 @@
+# Aims
+Built a multi-camera tracking system, convert bounding boxes with global id into a united 2D-plane, showcasing how objects moving
+
 # Background
 1. Multi-Camera Videos to 2D mapping
 2. Homography estimation
