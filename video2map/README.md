@@ -43,6 +43,8 @@ Put everything in the same path.
 
 sample input: 
 
+(for data, json for bounding box, dimension: frame no -> global id no -> bounding box)
+
 sample output: 
 
 ## Outputs
