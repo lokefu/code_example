@@ -1,3 +1,6 @@
+# Aims
+How to read-in table in PDF
+
 # Background
 1. Table recognition and OCR from PDF
 2. Table location (page) by keyword match via RAG database in Langchain
