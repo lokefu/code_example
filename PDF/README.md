@@ -1,3 +1,6 @@
+# Aims
+To extract information from PDF's table, then use RAG for generation
+
 # Background
 1. Data extraction from PDF's table
 2. RAG with keywords format match + LLM for summary and generation
