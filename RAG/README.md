@@ -1,3 +1,6 @@
+# Aims
+To build intelligence chat/search bot, using RAG on existing data
+
 # Background
 1. Singapore National Park Biodiversity, Chatbot for animals' information
 2. RAG + LLM
