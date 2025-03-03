@@ -10,8 +10,8 @@ Note: Put cv folder under your code home directory
 
 1. img_vid.py
   - images to video
-  images to gif
-  video to images
+  - images to gif
+  - video to images
 
 2. video_info.py
   general info: frame no, fps, video length
