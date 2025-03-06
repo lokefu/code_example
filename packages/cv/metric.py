@@ -21,22 +21,21 @@ def calculate_classification_metrics(pred, ground_truth, print_show = False, yes
     TNR = TN / (TN + FP) if (TN + FP) != 0 else 0
     FPR = FP / (FP + TN) if (FP + TN) != 0 else 0
     FNR = FN / (FN + TP) if (FN + TP) != 0 else 0
-    Prediction = (TP + TN) / (TP + TN + FP + FN)
-    Accuracy = accuracy_score(ground_truth, pred)
-    Recall = recall_score(ground_truth, pred)
+    Accuracy = (TP + TN) / (TP + TN + FP + FN)
     F1 = f1_score(ground_truth, pred)
+    
+    #Accuracy = accuracy_score(ground_truth, pred)
+    #Recall = recall_score(ground_truth, pred) #TPR
     
     if print_show:
         print("True Positive Rate (TPR):", TPR)
         print("True Negative Rate (TNR):", TNR)
         print("False Positive Rate (FPR):", FPR)
         print("False Negative Rate (FNR):", FNR)
-        print("Prediction:", Prediction)
         print("Accuracy:", Accuracy)
-        print("Recall:", Recall)
         print("F1 Score:", F1)
     
-    return TPR, TNR, FPR, FNR, Prediction, Accuracy, Recall, F1
+    return TPR, TNR, FPR, FNR, Accuracy, F1
 
 # Example usage
 #pred = [1, 0, 1, 0, 1]

@@ -1,10 +1,18 @@
 # The collection of util functions in CV
 
-Note: Put cv folder under your code home directory
+Note: Put func folder under your code home directory
 
     .
-    ├── cv
-    ├── your_code.ipynb
+    ├── func
+      ├── cv
+      ├── ...
+    ├── your_code.ipynb/py
+
+## If only use CV
+
+1. Put cv under home directory
+
+2. Change __init__.py: func.cv.img_vid to cv.img_vid
 
 # The structure of util functions in CV
 
@@ -26,15 +34,16 @@ Note: Put cv folder under your code home directory
   - merge videos
 
 4. utils.py
-  - make folder
-  - extract number in file name
-  - extract alpha in file name
-  - get file list in a folder
-  - ignore warnings
-  - no outputs at all
-  - no outputs in one block
-  - save list/dict in json
-  - load list/dict in json
+  - borrow from other modules
+    - make folder
+    - extract number in file name
+    - extract alpha in file name
+    - get file list in a folder
+    - ignore warnings
+    - no outputs at all
+    - no outputs in one block
+    - save list/dict in json
+    - load list/dict in json
 
 5. draw.py
   - generate random color

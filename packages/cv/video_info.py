@@ -30,7 +30,7 @@ def count_frames(video_path):
         return
 
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    print("Number of frames in the video:", frame_count)
+    #print("Number of frames in the video:", frame_count)
 
     cap.release()
     return frame_count
@@ -52,7 +52,7 @@ def get_fps(video_path):
         return
     
     fps = cap.get(cv2.CAP_PROP_FPS)
-    print(f"Frames per second (fps): {fps}")
+    #print(f"Frames per second (fps): {fps}")
     
     cap.release()
     return fps
@@ -77,7 +77,7 @@ def get_video_length(video_path):
     
     # Calculate video length in seconds
     video_length = frame_count / fps
-    print(f"Video length: {video_length} seconds")
+    #print(f"Video length: {video_length} seconds")
     
     cap.release()
     
