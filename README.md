@@ -8,6 +8,8 @@
 
   - table_ocr: table recognition + OCR from PDF/Image
 
+  - video2map: multi-camera tracking and mapping into 2D
+
 
 ## packages
 
