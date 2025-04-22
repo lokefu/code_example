@@ -13,6 +13,8 @@ To extract information from PDF's table, then use RAG for generation
 6. Vector Database: FAISS
 7. LLM: mistralai/Mistral-7B-Instruct-v0.3
 
+# Demo
+A demo recording: https://drive.google.com/file/d/12ImF9d6pi3_pludW0jl1VEX0yLkuzgwp/view?usp=drive_link
 
 # Set-up
 ## Environment
