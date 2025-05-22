@@ -1,0 +1,947 @@
+diff --git a/lib/demo_helpers/video_data_storage.py b/lib/demo_helpers/video_data_storage.py
+index a13ce48..d8db962 100644
+--- a/lib/demo_helpers/video_data_storage.py
++++ b/lib/demo_helpers/video_data_storage.py
+@@ -10,11 +10,247 @@ from dataclasses import dataclass
+ 
+ # For type hints
+ from torch import Tensor
+-
++import torch
++import numpy as np
++from typing import Optional
+ 
+ # ---------------------------------------------------------------------------------------------------------------------
+ # %% Data types
+ 
++from lib.demo_helpers.bounding_boxes import get_one_mask_bounding_box, box_xy1xy2_to_xywh, box_xywh_to_xy1xy2
++import cv2
++
++class SimpleSamurai:
++    """
++    Simplified interpretation of the SAM mask post-processing steps described in the paper:
++        "SAMURAI: Adapting Segment Anything Model for Zero-Shot Visual Tracking with Motion-Aware Memory"
++        By: Cheng-Yen Yang, Hsiang-Wei Huang, Wenhao Chai, Zhongyu Jiang, Jenq-Neng Hwang
++        @ https://arxiv.org/abs/2411.11922
++
++    The basic idea is to include an additional tracking model (a kalman filter) which estimates the
++    bounding box of mask predictions from the SAMv2 model. These box predictions are then used to
++    influence which of the SAM mask predictions should be used at each time step. The original SAMv2
++    model used it's own internal IoU prediction (called 'affinity' in the SAMURAI paper), while SAMURAI
++    uses a weighted combination of the SAM IoU along with the IoU between the kalman filter box prediction
++    and candidate masks. SAMURAI also ignores memory encodings based on additional scoring thresholds.
++
++    This implementation is closer to the implementation described in the paper itself, rather
++    than the code associated with the paper, though it does not match either exactly.
++    One major difference is that this implementation tracks bounding box values: [x,y,w,h]
++    as described in the paper, while the original code tracks: [x,y,ar,h].
++    There are also significant differences in process & measurement noise models.
++    The original code can be found here:
++    https://github.com/yangchris11/samurai/blob/76ba195984892b0d1e3db5d9c9f90bb62175680a/sam2/sam2/utils/kalman_filter.py
++    """
++
++    # Kalman filter noise scaling factors, these are just kind of made up
++    # -> Tracking is not especially sensitive to these values
++    # -> For more optimal tracking, these would need to be tuned to match the statistics of the objects being tracked
++    value_noise_base = 0.25
++    velo_scale_base = 0.1
++
++    # Weights & thresholds used in samurai algorithm
++    alpha_kf = 0.15
++    threshold_objscore = 0.0
++    threshold_affinity = 0.5
++    threshold_kf = 0.5
++
++    def __init__(self, initial_mask, video_framerate=1, smoothness=0.5):
++
++        # Set up base kalman filter, using state vector: [x, y, w, h, vx, vy, vw, vh]
++        # -> State vectors is a set of 4 values and corresponding velocities (rates of change)
++        # -> We assume we can only measure the values
++        num_state_params, num_measured_params = 8, 4
++        self._kalman = cv2.KalmanFilter(num_state_params, num_measured_params)
++        floattype = np.float32
++
++        # Values update with velocity, velocities are estimated as constant
++        # eq: S(t) = T * S(t-1), where T is matrix below, S is state vector: [x,y,w,h,vx,vy,vw,vh]
++        # (this matrix is called the 'state transition model' on wikipedia entry)
++        dt = 1 / video_framerate
++        self._kalman.transitionMatrix = np.array(
++            [
++                [1, 0, 0, 0, dt, 0, 0, 0],
++                [0, 1, 0, 0, 0, dt, 0, 0],
++                [0, 0, 1, 0, 0, 0, dt, 0],
++                [0, 0, 0, 1, 0, 0, 0, dt],
++                [0, 0, 0, 0, 1, 0, 0, 0],
++                [0, 0, 0, 0, 0, 1, 0, 0],
++                [0, 0, 0, 0, 0, 0, 1, 0],
++                [0, 0, 0, 0, 0, 0, 0, 1],
++            ],
++            dtype=floattype,
++        )
++
++        # Assume we measure values directly but can't measure velocities
++        # eq: Measurement(t) = M * S'(t), where M is matrix below, S' is true state we're estimating
++        # (this matrix is called the 'observation model' on wikipedia entry)
++        self._kalman.measurementMatrix = np.array(
++            [
++                [1, 0, 0, 0, 0, 0, 0, 0],
++                [0, 1, 0, 0, 0, 0, 0, 0],
++                [0, 0, 1, 0, 0, 0, 0, 0],
++                [0, 0, 0, 1, 0, 0, 0, 0],
++            ],
++            dtype=floattype,
++        )
++
++        # Also assume all values have equal variance, all velocities have equal variance
++        # -> This is a bit silly but simple to specify
++        value_var = self.value_noise_base
++        velo_var = value_var * self.velo_scale_base
++        self._kalman.processNoiseCov = np.diag([*[value_var] * 4, *[velo_var] * 4]).astype(floattype)
++
++        # Assume same measurement noise on all values because it's easy to specify
++        # -> Smoothness is scaled a number between 0 and near-infinity in an arbitrary way (using tangent function)
++        # -> Higher smoothness values make the measurements (i.e. the 'real' mask bounding boxes)
++        #    less trustworthy for kalman predictions, so predictions will lag fast mask changes
++        smoothness = np.clip(smoothness, 0, 0.995)
++        measure_var = value_var * (np.tan(smoothness * np.pi * 0.5) ** 2)
++        self._kalman.measurementNoiseCov = np.diag([*[measure_var] * 4]).astype(floattype)
++
++        # Initialize kalman filter
++        is_valid_mask, initial_mask_box = get_one_mask_bounding_box(initial_mask)
++        assert is_valid_mask, "Initial mask is empty!"
++        init_xywh = box_xy1xy2_to_xywh(*initial_mask_box)
++        init_velos = [0] * 4
++        init_state = np.array([*init_xywh, *init_velos], dtype=floattype)
++        self._kalman.statePre = init_state
++        self._kalman.statePost = init_state
++
++    def get_best_decoder_results(
++        self, mask_predictions, iou_predictions, exclude_0th_index=True
++    ) -> tuple[int, float, tuple[tuple, tuple]]:
++        """
++        Function used to pick the best mask prediction for tracking.
++        Uses a kalman filter to predict where the object bounding box should be
++        based on previous frames. The masks are scored based one the overlap
++        with the kalman prediction. The 'best' mask is then selected based on
++        a weighted sum of the kalman filter score and original SAM IoU score.
++
++        Returns:
++            best_mask_index, best_iou, kalman_box_xy1xy2
++
++        - The returned kalman box is formatted as: [(x1, y1), (x2, y2)]
++        """
++
++        # Make sure we don't get batched data
++        batch_size, num_masks = mask_predictions.shape[0:2]
++        assert batch_size == 1, "Error! No support for batched inputs. Run .update(...) over the batch instead"
++
++        # Get bounding box of each mask
++        mask_xy1xy2_list = [get_one_mask_bounding_box(mask_predictions[0, midx]) for midx in range(num_masks)]
++
++        # Compute IoU of each box vs. the kalman prediction
++        kal_predict_as_xywh = self._kalman.predict()[:4]
++        (x1_kal, y1_kal), (x2_kal, y2_kal) = box_xywh_to_xy1xy2(*kal_predict_as_xywh)
++        kalman_ious = np.zeros(num_masks, dtype=np.float32)
++        for midx, (_, ((x1, y1), (x2, y2))) in enumerate(mask_xy1xy2_list):
++
++            # Compute intersection area between kalman predicted box & mask box
++            inter_w = min(x2, x2_kal) - max(x1, x1_kal)
++            inter_h = min(y2, y2_kal) - max(y1, y1_kal)
++            inter_area = max(0, inter_w) * max(0, inter_h)
++
++            # Compute union of areas
++            kal_area = (x2_kal - x1_kal) * (y2_kal - y1_kal)
++            mask_area = (x2 - x1) * (y2 - y1)
++            union_area = kal_area + mask_area - inter_area
++
++            # Record the IoU for each mask, so we can check which is best
++            kalman_mask_iou = inter_area / union_area if union_area > 0.001 else 0
++            kalman_ious[midx] = kalman_mask_iou
++
++        # Perform weighted mask index selection scoring as per samurai paper (see eq. 7)
++        affinity_scores = iou_predictions[0].float().cpu().numpy()
++        weighted_samurai_score = kalman_ious * self.alpha_kf + affinity_scores * (1.0 - self.alpha_kf)
++        if exclude_0th_index:
++            weighted_samurai_score[0] = -100
++
++        # Pick the highest score between weighted samurai + original sam predictions
++        best_idx = np.argmax(weighted_samurai_score)
++        best_iou = weighted_samurai_score[best_idx]
++
++        # Get the best mask bounding box in terms of kalman filter state variables, for measurement update
++        is_valid_mask, best_box_as_xy1xy2 = mask_xy1xy2_list[best_idx]
++        if is_valid_mask:
++            best_box_as_xywh = box_xy1xy2_to_xywh(*best_box_as_xy1xy2)
++            kal_measurement = np.array([best_box_as_xywh], dtype=np.float32).T
++            self._kalman.correct(kal_measurement)
++
++        # Include kalman prediction in output, for debugging/visualization
++        kalman_prediction_xy1xy2 = (np.array((x1_kal, y1_kal)), np.array((x2_kal, y2_kal)))
++        return best_idx, best_iou, kalman_prediction_xy1xy2
++
++    def step_video_masking(
++        self,
++        sammodel,
++        encoded_image_features_list: list[Tensor],
++        prompt_memory_encodings: list[Tensor],
++        prompt_object_pointers: list[Tensor],
++        previous_memory_encodings: list[Tensor],
++        previous_object_pointers: list[Tensor],
++    ) -> [bool, Tensor, Tensor, Tensor, tuple[tuple, tuple]]:
++        """
++        Variant of original SAMv2 video tracking function, instead of using
++        SAMv2 IoU predictions to select mask during tracking, this function
++        uses SAMURAI to select the best mask.
++
++        Returns:
++            obj_score, is_ok_memory, best_mask_prediction, memory_encoding, best_object_point, xy1xy2_kalman_prediction
++        """
++
++        with torch.inference_mode():
++
++            # Encode image features with previous memory encodings & object pointer data
++            lowres_imgenc, *hires_imgenc = encoded_image_features_list
++            memfused_encimg = sammodel.memory_fusion(
++                lowres_imgenc,
++                prompt_memory_encodings,
++                prompt_object_pointers,
++                previous_memory_encodings,
++                previous_object_pointers,
++            )
++
++            # Run mask decoder on memory-fused features
++            patch_grid_hw = memfused_encimg.shape[2:]
++            grid_posenc = sammodel.coordinate_encoder.get_grid_position_encoding(patch_grid_hw)
++            mask_preds, iou_preds, obj_ptrs, obj_score = sammodel.mask_decoder(
++                [memfused_encimg, *hires_imgenc],
++                sammodel.prompt_encoder.create_video_no_prompt_encoding(),
++                grid_posenc,
++                mask_hint=None,
++                blank_promptless_output=False,
++            )
++
++            # Use samurai predictions to pick the best mask, instead of just using SAM IoUs
++            # (this is the main difference between SAMv2 vs. SAMURAI)
++            best_mask_idx, best_samurai_iou, xy1xy2_kal = self.get_best_decoder_results(mask_preds, iou_preds)
++            best_mask_pred = mask_preds[:, [best_mask_idx], ...]
++            best_iou_pred = iou_preds[:, [best_mask_idx], ...]
++            best_obj_ptr = obj_ptrs[:, [best_mask_idx], ...]
++
++            # Encode new memory features
++            # -> we could skip this if memory check comes back bad
++            # -> but included here anyways for the sake of debugging/inspection
++            memory_encoding = sammodel.memory_encoder(lowres_imgenc, best_mask_pred, obj_score)
++
++        is_ok_mem = self._check_memory_ok(obj_score, best_iou_pred, best_samurai_iou)
++
++        return obj_score, is_ok_mem, best_mask_pred, memory_encoding, best_obj_ptr, xy1xy2_kal
++
++    def _check_memory_ok(self, object_score, iou_score, kf_score) -> bool:
++        """
++        Helper used to decide if a memory encoding should be store for re-use
++        Storage is based on scoring passing several thresholds, similar to
++        the original SAMv2, but with extra parameters.
++        """
++
++        ok_obj = object_score > self.threshold_objscore
++        ok_iou = iou_score > self.threshold_affinity
++        ok_kf = kf_score > self.threshold_kf
++
++        return ok_obj and ok_iou and ok_kf
+ 
+ @dataclass
+ class SAM2VideoBuffer:
+@@ -72,12 +308,18 @@ class SAM2VideoObjectResults:
+ 
+     prompts_buffer: SAM2VideoBuffer
+     prevframe_buffer: SAM2VideoBuffer
++    mask: Optional[np.dtype]
++    samurai: Optional[SimpleSamurai]
++    bad_ctr: int
+ 
+     @classmethod
+     def create(cls, memory_history_length=6, pointer_history_length=15, prompt_history_length=32):
+         prompts_buffer = SAM2VideoBuffer.create(prompt_history_length, prompt_history_length)
+         prevframe_buffer = SAM2VideoBuffer.create(memory_history_length, pointer_history_length)
+-        return cls(prompts_buffer, prevframe_buffer)
++        mask = None
++        samurai = None
++        bad_ctr = 0
++        return cls(prompts_buffer, prevframe_buffer, mask, samurai, bad_ctr)
+ 
+     def store_prompt_result(self, frame_index, memory_encoding, object_pointer=None):
+         """Used to store (initial) prompt results"""
+@@ -89,6 +331,23 @@ class SAM2VideoObjectResults:
+         self.prevframe_buffer.store(frame_index, memory_encoding, object_pointer)
+         return self
+ 
++    def store_mask(self, mask):
++        """Used to store current-frame mask result"""
++        self.mask = mask
++        return self
++    
++    def store_samurai(self, samurai):
++        self.samurai = samurai
++        return self
++    
++    def increment_bad_ctr(self, ctr = 1):
++        self.bad_ctr = self.bad_ctr + ctr
++        return self
++
++    def reset_bad_ctr(self):
++        self.bad_ctr = 0
++        return self
++
+     def to_dict(self) -> dict:
+         """Helper used to convert stored data into a dictionary, so it can be used as a 'kwargs' argument"""
+         return {
+diff --git a/requirements.txt b/requirements.txt
+index 4513180..897227e 100644
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -1,3 +1,7 @@
+ opencv-python   >=4.5, <4.12
+ numpy           >=1.21, <2.3
+ torch           >=2.1, <2.7
++scikit-image
++supervision
++rfdetr
++tqdm
+diff --git a/simple_examples/mot.py b/simple_examples/mot.py
+new file mode 100644
+index 0000000..b63838a
+--- /dev/null
++++ b/simple_examples/mot.py
+@@ -0,0 +1,289 @@
++#!/usr/bin/env python3
++# -*- coding: utf-8 -*-
++
++# This is a hack to make this script work from outside the root project folder (without requiring install)
++try:
++    import lib  # NOQA
++except ModuleNotFoundError:
++    import os
++    import sys
++
++    parent_folder = os.path.dirname(os.path.dirname(__file__))
++    if "lib" in os.listdir(parent_folder):
++        sys.path.insert(0, parent_folder)
++    else:
++        raise ImportError("Can't find path to lib folder!")
++
++import time
++from tqdm import tqdm
++from collections import defaultdict
++
++import cv2
++import numpy as np
++import supervision as sv
++
++import torch
++from rfdetr import RFDETRBase
++from lib.v2_sam.make_sam_v2 import make_samv2_from_original_state_dict
++from lib.demo_helpers.video_data_storage import SAM2VideoObjectResults, SimpleSamurai
++from skimage.morphology import remove_small_objects as skimage_remove_small_objects # Fallback
++
++
++# --- cucim & CuPy Setup ---
++cucim_rso_available = False
++cp = None  # Will hold the cupy module if import is successful
++cucim_rso_func = None # Will hold the cucim remove_small_objects function
++
++try:
++    cp = __import__('cupy') # Import cupy
++    from cucim.skimage.morphology import remove_small_objects as _cucim_rso_func
++    cucim_rso_func = _cucim_rso_func
++    cucim_rso_available = True
++    print(f"CuPy (version: {cp.__version__}) and cucim.skimage.morphology.remove_small_objects found. Will use GPU for remove_small_objects via cucim.")
++except ImportError:
++    if 'cp' in locals() and cp is not None:
++        print(f"CuPy (version: {cp.__version__}) found, but 'cucim.skimage.morphology.remove_small_objects' is not available. Falling back for RSO.")
++    else:
++        print("CuPy and/or 'cucim.skimage.morphology.remove_small_objects' not found. RSO will run on CPU using scikit-image.")
++# --- End cucim & CuPy Setup ---
++
++
++# Define pathing & device usage
++video_path = "/home/jupyter/muggled_sam/inputs/others/IMG_1240.MOV"
++output_path = "./outputs/IMG_1240_sam.mp4"
++model_path = "./model_weights/sam2.1_hiera_base_plus.pt"
++device, dtype = "cpu", torch.float32
++if torch.cuda.is_available():
++    device, dtype = "cuda", torch.bfloat16
++
++# Define image processing config (shared for all video frames)
++imgenc_config_dict = {"max_side_length": 1024, "use_square_sizing": True}
++
++# Set up memory storage for tracked objects
++# -> Assumes each object is represented by a unique dictionary key (e.g. 'obj1')
++# -> This holds both the 'prompt' & 'recent' memory data needed for tracking!
++memory_per_obj_dict = defaultdict(SAM2VideoObjectResults.create)
++
++# Read first frame to check that we can read from the video, then reset playback
++vcap = cv2.VideoCapture(video_path)
++vcap.set(cv2.CAP_PROP_ORIENTATION_AUTO, 1)  # See: https://github.com/opencv/opencv/issues/26795
++ok_frame, first_frame = vcap.read()
++if not ok_frame:
++    raise IOError(f"Unable to read video frames: {video_path}")
++vcap.set(cv2.CAP_PROP_POS_FRAMES, 0)
++
++# Set up model
++print("Loading model...")
++model_config_dict, sammodel = make_samv2_from_original_state_dict(model_path)
++sammodel.to(device=device, dtype=dtype)
++model = RFDETRBase(device=device)
++
++# How often to redo detection
++step = 15
++skip_frames = 5
++# How many tracking frames it can be occluded before it gets removed
++# E.g threshold of 10 at skip_frames of 5 => 10/(15/5) 3.33s before its removed after complete occlusion
++# Increasing this threshold increases processing time
++occlusion_threshold = 10
++# At what SAM2 object score to remove for display to reduce artifacts
++obj_score_threshold = 2.5
++# IOU Threshold
++iou_threshold = 0.5
++# object tracker index
++object_index = 0
++# tqdm progress bar
++progress_bar = None
++
++mask_annotator = sv.MaskAnnotator(color_lookup=sv.ColorLookup.TRACK)
++box_annotator = sv.BoxAnnotator(color_lookup=sv.ColorLookup.TRACK)
++label_annotator = sv.LabelAnnotator(color_lookup=sv.ColorLookup.TRACK)
++
++def get_existing_mask(frame, mask):
++    non_none_masks = [object_memory.mask for _, object_memory in memory_per_obj_dict.items() if object_memory.mask is not None]
++
++    if len(non_none_masks) > 0:
++        obj_mask = torch.nn.functional.interpolate(
++            mask,
++            size=frame.shape[:2],
++            mode="bilinear",
++            align_corners=False,
++        )
++        obj_mask_binary = (obj_mask > 0.0).cpu().numpy().squeeze()
++
++        iou_scores = sv.mask_iou_batch(np.array(non_none_masks), np.array([obj_mask_binary]))
++
++        if np.any(iou_scores > iou_threshold):
++            return True
++    
++    return None
++
++def callback(frame, frame_idx):
++    # tqdm progress bar
++    global progress_bar
++    if progress_bar is None:
++        progress_bar = tqdm(total=900, desc="Processing Video")
++    progress_bar.update(1)
++
++    if (frame_idx % skip_frames == 0):
++        # Encode frame data (shared for all objects)
++        encoded_imgs_list, _, _ = sammodel.encode_image(frame, **imgenc_config_dict)
++
++        # Storage for results
++        label_result = []
++        mask_result = []
++        
++        marked_for_deletion = []
++        # Update tracking using newest frame
++        for obj_key_name, obj_memory in memory_per_obj_dict.items():
++            # 1. step_video_masking
++            obj_score, is_mem_ok, best_mask_pred, mem_enc, obj_ptr, xy1xy2_kal = obj_memory.samurai.step_video_masking(
++                sammodel, encoded_imgs_list, **obj_memory.to_dict()
++            )
++
++            # Store memory if samurai says its ok for tracking
++            if is_mem_ok:
++                # Store 'recent' memory encodings from current frame (helps track objects with changing appearance)
++                # -> This can be commented out and tracking may still work, if object doesn't change much
++                obj_memory.store_result(frame_idx, mem_enc, obj_ptr)
++            else:
++                obj_memory.increment_bad_ctr()
++                if obj_memory.bad_ctr > occlusion_threshold:
++                    marked_for_deletion.append(obj_key_name)
++                    continue
++
++            # Add object mask prediction to 'combine' mask for display
++            # -> This is just for visualization, not needed for tracking
++            obj_mask = torch.nn.functional.interpolate(
++                best_mask_pred,
++                size=frame.shape[:2],
++                mode="bilinear",
++                align_corners=False,
++            )
++            obj_mask_binary = (obj_mask > 0.0).cpu().numpy().squeeze()
++
++            obj_memory.store_mask(obj_mask_binary)
++
++            # But skip it for display if score is bad to reduce artifacts.
++            if obj_score < obj_score_threshold:
++                continue
++
++            if cucim_rso_available and cp is not None:
++                try:
++                    obj_mask_gpu = cp.asarray(obj_mask_binary)
++                    cleaned_mask_gpu = cucim_rso_func(obj_mask_gpu, min_size=128, connectivity=1)
++                    obj_mask_binary = cp.asnumpy(cleaned_mask_gpu)
++                except Exception:
++                    obj_mask_binary = skimage_remove_small_objects(obj_mask_binary, min_size=128, connectivity=1)
++            else:
++                obj_mask_binary = skimage_remove_small_objects(obj_mask_binary, min_size=128, connectivity=1)
++            
++            label_result.append(int(obj_key_name))
++            mask_result.append(obj_mask_binary)
++            
++        for to_delete in marked_for_deletion:
++            memory_per_obj_dict.pop(to_delete, None)
++
++        # Doing detection after the mask are updated for this frame improves results
++        frame_prompts_dict = {}
++        if (frame_idx % step == 0):
++            # Generate prompt dict from detection model
++            detections = model.predict(frame, threshold=0.5)
++            detections = detections[detections.class_id == 1]
++
++            image_height, image_width = frame.shape[:2]
++            for i, box in enumerate(detections.xyxy):
++                x1, y1, x2, y2 = box
++                norm_x1 = x1 / image_width
++                norm_y1 = y1 / image_height
++                norm_x2 = x2 / image_width
++                norm_y2 = y2 / image_height
++
++                # Clamp values to [0.0, 1.0] to handle potential rounding errors
++                # or boxes slightly outside the frame.
++                norm_x1 = max(0.0, min(1.0, norm_x1))
++                norm_y1 = max(0.0, min(1.0, norm_y1))
++                norm_x2 = max(0.0, min(1.0, norm_x2))
++                norm_y2 = max(0.0, min(1.0, norm_y2))
++                formatted_box_list = [(float(norm_x1), float(norm_y1)), (float(norm_x2), float(norm_y2))]
++
++                frame_prompts_dict[i] = {
++                    "box_tlbr_norm_list": [formatted_box_list],
++                    "fg_xy_norm_list": [],
++                    "bg_xy_norm_list": [],
++                }
++        
++        # Moved prompt generation to after mask generation for better iou as you are not comparing against the previous frame
++        # Generate & store prompt memory encodings for each object as needed
++        prompts_dict = frame_prompts_dict if frame_prompts_dict else None
++        if prompts_dict is not None:
++
++            # Loop over all sets of prompts for the current frame
++            for obj_key_name, obj_prompts in prompts_dict.items():
++                init_mask, init_mem, init_ptr = sammodel.initialize_video_masking(encoded_imgs_list, **obj_prompts)
++                    
++                existing_masks = get_existing_mask(frame, init_mask)
++
++                if existing_masks is None:
++                    global object_index
++                    object_index = (object_index or 0) + 1
++                    memory_per_obj_dict[object_index].store_prompt_result(frame_idx, init_mem, init_ptr)
++                    samurai = SimpleSamurai(init_mask)
++                    memory_per_obj_dict[object_index].store_samurai(samurai)
++
++                # Directly show mask for first frame
++                if frame_idx == 0:
++                    obj_mask = torch.nn.functional.interpolate(
++                        init_mask,
++                        size=frame.shape[:2],
++                        mode="bilinear",
++                        align_corners=False,
++                    )
++                    obj_mask_binary = (obj_mask > 0.0).cpu().numpy().squeeze()
++                    obj_mask_gpu = cp.asarray(obj_mask_binary)
++                    cleaned_mask_gpu = cucim_rso_func(obj_mask_gpu, min_size=128, connectivity=1)
++                    obj_mask_binary = cp.asnumpy(cleaned_mask_gpu)
++                    label_result.append(int(object_index))
++                    mask_result.append(obj_mask_binary)
++       
++        global stored_annotated_frame
++        
++        if len(mask_result) == 0:
++            stored_annotated_frame = frame
++            return frame
++
++        # Write results to frame
++        mask_detections = sv.Detections(
++            xyxy=sv.mask_to_xyxy(np.array(mask_result)),
++            mask=np.array(mask_result),
++            tracker_id=np.array(label_result)
++        )
++        annotated_frame = mask_annotator.annotate(
++            scene=frame.copy(),
++            detections=mask_detections,
++        )
++        annotated_frame = box_annotator.annotate(
++            scene=annotated_frame,
++            detections=mask_detections,
++        )
++        annotated_frame = label_annotator.annotate(
++            scene=annotated_frame,
++            detections=mask_detections,
++            labels=[str(i) for i in label_result]
++        )
++
++        stored_annotated_frame = annotated_frame
++
++    return stored_annotated_frame
++
++process_time_start = time.time()
++
++sv.process_video(
++    source_path=video_path,
++    target_path=output_path,
++    callback=callback
++)
++if progress_bar:
++    progress_bar.close()
++
++process_time = time.time() - process_time_start 
++print('process_time', process_time)
+\ No newline at end of file
+diff --git a/simple_examples/mot_hun.py b/simple_examples/mot_hun.py
+new file mode 100644
+index 0000000..e9e953b
+--- /dev/null
++++ b/simple_examples/mot_hun.py
+@@ -0,0 +1,335 @@
++#!/usr/bin/env python3
++# -*- coding: utf-8 -*-
++
++# Standard library imports
++import os
++import sys
++import time
++from collections import defaultdict
++
++# Third-party imports
++import cv2
++import numpy as np
++import torch
++from scipy.optimize import linear_sum_assignment
++from skimage.morphology import remove_small_objects as skimage_remove_small_objects
++import supervision as sv
++from supervision.detection.utils import box_iou_batch
++from tqdm import tqdm
++
++# Local application/library specific imports
++# This is a hack to make this script work from outside the root project folder (without requiring install)
++try:
++    import lib  # NOQA
++except ModuleNotFoundError:
++    parent_folder = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) # Use abspath for robustness
++    if "lib" in os.listdir(parent_folder):
++        sys.path.insert(0, parent_folder)
++    else:
++        # Try one more level up if __file__ is in a subdirectory of the intended parent
++        parent_of_parent_folder = os.path.dirname(parent_folder)
++        if "lib" in os.listdir(parent_of_parent_folder):
++            sys.path.insert(0, parent_of_parent_folder)
++        else:
++            raise ImportError(
++                f"Can't find path to lib folder! Looked in {parent_folder} and {parent_of_parent_folder}"
++            )
++
++from rfdetr import RFDETRBase
++from lib.v2_sam.make_sam_v2 import make_samv2_from_original_state_dict
++from lib.demo_helpers.video_data_storage import SAM2VideoObjectResults, SimpleSamurai
++
++
++# --- Configuration Constants ---
++VIDEO_PATH = "/home/jupyter/muggled_sam/inputs/others/test_3min_crowd.mp4"
++OUTPUT_VIDEO_PATH = "./outputs/cro_sam_hun_refactored.mp4"
++SAM_MODEL_PATH = "./model_weights/sam2.1_hiera_base_plus.pt"
++
++DEVICE_PREFERENCE = "cuda" if torch.cuda.is_available() else "cpu"
++DTYPE_PREFERENCE = torch.bfloat16 if DEVICE_PREFERENCE == "cuda" else torch.float32
++
++IMGENC_MAX_SIDE_LENGTH = 1024
++IMGENC_USE_SQUARE_SIZING = True
++
++DETECTION_STEP_INTERVAL = 15  # How often to run RFDETR detection and Hungarian matching
++SAM_UPDATE_SKIP_FRAMES = 5   # How often to process frames for SAM tracking updates
++OCCLUSION_THRESHOLD_FRAMES = 10
++SAM_OBJECT_SCORE_THRESHOLD = 2.5
++BBOX_IOU_THRESHOLD_MATCHING = 0.5
++RSO_MIN_SIZE = 128  # Min size for remove_small_objects
++RFDETR_CONFIDENCE_THRESHOLD = 0.5
++RFDETR_TARGET_CLASS_ID = 1
++# --- End Configuration Constants ---
++
++
++# --- cucim & CuPy Setup ---
++cucim_rso_available = False
++cp = None
++cucim_rso_func = None
++
++try:
++    cp = __import__('cupy')
++    from cucim.skimage.morphology import remove_small_objects as _cucim_rso_func
++    cucim_rso_func = _cucim_rso_func
++    cucim_rso_available = True
++    print(f"CuPy (version: {cp.__version__}) and cucim.skimage.morphology.remove_small_objects found. "
++          "Will use GPU for remove_small_objects via cucim.")
++except ImportError:
++    if 'cp' in locals() and cp is not None:
++        print(f"CuPy (version: {cp.__version__}) found, but 'cucim.skimage.morphology.remove_small_objects' "
++              "is not available. Falling back for RSO.")
++    else:
++        print("CuPy and/or 'cucim.skimage.morphology.remove_small_objects' not found. "
++              "RSO will run on CPU using scikit-image.")
++# --- End cucim & CuPy Setup ---
++
++
++# --- Global State Variables ---
++# These are modified by the callback and used across calls
++memory_per_obj_dict = defaultdict(SAM2VideoObjectResults.create)
++object_index_counter = 0
++progress_bar_instance = None
++last_annotated_frame_cache = None
++# --- End Global State Variables ---
++
++
++# --- Model Initialization ---
++print("Loading SAM model...")
++sam_model_config, sam_model_instance = make_samv2_from_original_state_dict(SAM_MODEL_PATH)
++sam_model_instance.to(device=DEVICE_PREFERENCE, dtype=DTYPE_PREFERENCE)
++
++print("Loading detector model...")
++detector_model_instance = RFDETRBase(device=DEVICE_PREFERENCE)
++
++image_encoding_config = {
++    "max_side_length": IMGENC_MAX_SIDE_LENGTH,
++    "use_square_sizing": IMGENC_USE_SQUARE_SIZING
++}
++# --- End Model Initialization ---
++
++
++# --- Annotators ---
++mask_annotator = sv.MaskAnnotator(color_lookup=sv.ColorLookup.TRACK)
++box_annotator = sv.BoxAnnotator(color_lookup=sv.ColorLookup.TRACK)
++label_annotator = sv.LabelAnnotator(color_lookup=sv.ColorLookup.TRACK)
++# --- End Annotators ---
++
++
++def normalize_bbox_for_sam_prompt(box_xyxy, frame_width, frame_height):
++    """Normalizes a bounding box to [0,1] for SAM prompt."""
++    x1, y1, x2, y2 = box_xyxy
++    norm_x1 = max(0.0, min(1.0, x1 / frame_width))
++    norm_y1 = max(0.0, min(1.0, y1 / frame_height))
++    norm_x2 = max(0.0, min(1.0, x2 / frame_width))
++    norm_y2 = max(0.0, min(1.0, y2 / frame_height))
++    return [(float(norm_x1), float(norm_y1)), (float(norm_x2), float(norm_y2))]
++
++def process_detected_object_mask(binary_mask, track_id_for_display, obj_score):
++    """Cleans a binary mask and prepares it for display if score is sufficient."""
++    if obj_score < SAM_OBJECT_SCORE_THRESHOLD or not binary_mask.any():
++        return None, None
++
++    cleaned_mask = None
++    if cucim_rso_available and cp:
++        try:
++            mask_gpu = cp.asarray(binary_mask)
++            cleaned_mask_gpu = cucim_rso_func(mask_gpu, min_size=RSO_MIN_SIZE, connectivity=1)
++            cleaned_mask = cp.asnumpy(cleaned_mask_gpu)
++        except Exception as e:
++            print(f"Error during cucim remove_small_objects: {e}. Falling back to CPU.")
++            cleaned_mask = skimage_remove_small_objects(binary_mask, min_size=RSO_MIN_SIZE, connectivity=1)
++    else:
++        cleaned_mask = skimage_remove_small_objects(binary_mask, min_size=RSO_MIN_SIZE, connectivity=1)
++
++    if cleaned_mask.any():
++        return int(track_id_for_display), cleaned_mask
++    return None, None
++
++
++def callback(frame: np.ndarray, frame_idx: int) -> np.ndarray:
++    """
++    Processes a single video frame for object detection and tracking.
++    This function is intended to be used as a callback for supervision.process_video.
++    """
++    global progress_bar_instance, last_annotated_frame_cache, object_index_counter
++    global memory_per_obj_dict # Explicitly declare if modifying, defaultdict handles creation
++
++    if progress_bar_instance is None:
++        # vcap is a global variable defined outside this function, accessed here.
++        # This is okay for scripts but be mindful if refactoring into a class.
++        total_frames = int(vcap.get(cv2.CAP_PROP_FRAME_COUNT)) if vcap.isOpened() else 9000
++        progress_bar_instance = tqdm(total=total_frames, desc="Processing Video")
++    progress_bar_instance.update(1)
++
++    current_frame_height, current_frame_width = frame.shape[:2]
++
++    if frame_idx % SAM_UPDATE_SKIP_FRAMES == 0:
++        encoded_imgs_list, _, _ = sam_model_instance.encode_image(frame, **image_encoding_config)
++        
++        current_frame_display_labels = []
++        current_frame_display_masks = []
++        tracks_marked_for_deletion = []
++
++        # --- A. Update Existing Tracks ---
++        for track_id, obj_memory in list(memory_per_obj_dict.items()):
++            obj_score, is_mem_ok, current_mask_tensor, mem_enc, obj_ptr, _ = \
++                obj_memory.samurai.step_video_masking(
++                    sam_model_instance, encoded_imgs_list, **obj_memory.to_dict()
++                )
++
++            if is_mem_ok:
++                obj_memory.store_result(frame_idx, mem_enc, obj_ptr)
++            else:
++                obj_memory.increment_bad_ctr()
++                if obj_memory.bad_ctr > OCCLUSION_THRESHOLD_FRAMES:
++                    tracks_marked_for_deletion.append(track_id)
++                    continue
++
++            obj_mask_resized = torch.nn.functional.interpolate(
++                current_mask_tensor, size=(current_frame_height, current_frame_width),
++                mode="bilinear", align_corners=False,
++            )
++            obj_mask_binary = (obj_mask_resized > 0.0).cpu().numpy().squeeze()
++            obj_memory.store_mask(obj_mask_binary)
++
++            label_to_display, mask_to_display = process_detected_object_mask(
++                obj_mask_binary, track_id, obj_score
++            )
++            if label_to_display is not None:
++                current_frame_display_labels.append(label_to_display)
++                current_frame_display_masks.append(mask_to_display)
++            elif obj_score < 0 and obj_memory.bad_ctr <= OCCLUSION_THRESHOLD_FRAMES: # Negative score is also bad
++                obj_memory.increment_bad_ctr() # Increment again if score is very bad
++                if obj_memory.bad_ctr > OCCLUSION_THRESHOLD_FRAMES:
++                     if track_id not in tracks_marked_for_deletion:
++                        tracks_marked_for_deletion.append(track_id)
++        
++        for track_id_to_delete in tracks_marked_for_deletion:
++            memory_per_obj_dict.pop(track_id_to_delete, None)
++
++        # --- B. New Detections and Hungarian Matching ---
++        if frame_idx % DETECTION_STEP_INTERVAL == 0:
++            rfdetr_detections = detector_model_instance.predict(frame, threshold=RFDETR_CONFIDENCE_THRESHOLD)
++            rfdetr_detections = rfdetr_detections[rfdetr_detections.class_id == RFDETR_TARGET_CLASS_ID]
++
++            new_detection_input_bboxes_xyxy = rfdetr_detections.xyxy
++            new_detection_prompts_to_init = []
++
++            if new_detection_input_bboxes_xyxy.shape[0] > 0:
++                for i, box_xyxy in enumerate(new_detection_input_bboxes_xyxy):
++                    normalized_box_list = normalize_bbox_for_sam_prompt(box_xyxy, current_frame_width, current_frame_height)
++                    new_detection_prompts_to_init.append({
++                        "original_detection_index": i,
++                        "xyxy_for_iou": box_xyxy,
++                        "prompts_for_sam_init": {
++                            "box_tlbr_norm_list": [normalized_box_list],
++                            "fg_xy_norm_list": [], "bg_xy_norm_list": [],
++                        }
++                    })
++
++            existing_track_bboxes_from_masks = []
++            existing_track_ids_for_matching = []
++            for track_id, obj_memory in memory_per_obj_dict.items():
++                if obj_memory.mask is not None and obj_memory.mask.any():
++                    mask_batch = np.expand_dims(obj_memory.mask, axis=0)
++                    boxes_from_mask = sv.mask_to_xyxy(mask_batch)
++                    if boxes_from_mask.shape[0] > 0:
++                        box_from_mask = boxes_from_mask[0]
++                        if box_from_mask[0] < box_from_mask[2] and box_from_mask[1] < box_from_mask[3]: # Valid box
++                            existing_track_bboxes_from_masks.append(box_from_mask)
++                            existing_track_ids_for_matching.append(track_id)
++            
++            matched_new_detection_indices = set()
++            if new_detection_input_bboxes_xyxy.shape[0] > 0 and len(existing_track_bboxes_from_masks) > 0:
++                existing_boxes_np = np.array(existing_track_bboxes_from_masks)
++                if new_detection_input_bboxes_xyxy.ndim == 2 and existing_boxes_np.ndim == 2 and \
++                   new_detection_input_bboxes_xyxy.shape[0] > 0 and existing_boxes_np.shape[0] > 0:
++                    
++                    iou_matrix = box_iou_batch(new_detection_input_bboxes_xyxy, existing_boxes_np)
++                    cost_matrix = 1 - iou_matrix
++                    row_indices, col_indices = linear_sum_assignment(cost_matrix)
++                    
++                    for r_idx, c_idx in zip(row_indices, col_indices):
++                        if iou_matrix[r_idx, c_idx] >= BBOX_IOU_THRESHOLD_MATCHING:
++                            matched_new_detection_indices.add(new_detection_prompts_to_init[r_idx]["original_detection_index"])
++            
++            for det_info in new_detection_prompts_to_init:
++                if det_info["original_detection_index"] not in matched_new_detection_indices:
++                    init_mask_tensor, init_mem, init_ptr = sam_model_instance.initialize_video_masking(
++                        encoded_imgs_list, **det_info["prompts_for_sam_init"]
++                    )
++                    object_index_counter += 1
++                    memory_per_obj_dict[object_index_counter].store_prompt_result(frame_idx, init_mem, init_ptr)
++                    samurai_tracker = SimpleSamurai(init_mask_tensor)
++                    memory_per_obj_dict[object_index_counter].store_samurai(samurai_tracker)
++                    # Note: These newly initialized tracks will have their first SAM *update* (step_video_masking)
++                    # and display in the *next* frame_idx that is a multiple of skip_frames.
++                    # If you need them displayed immediately, you'd have to run a mini-SAM-step here
++                    # or add their initial mask (after resizing and cleaning) to current_frame_display_masks.
++                    # For simplicity and consistency with the main loop, we let them be processed in the next cycle.
++
++        # --- C. Annotation ---
++        annotated_frame = frame.copy() # Start with a fresh copy
++        if current_frame_display_masks:
++            display_detections = sv.Detections(
++                xyxy=sv.mask_to_xyxy(np.array(current_frame_display_masks)),
++                mask=np.array(current_frame_display_masks),
++                tracker_id=np.array(current_frame_display_labels).astype(int)
++            )
++            annotated_frame = mask_annotator.annotate(scene=annotated_frame, detections=display_detections)
++            annotated_frame = box_annotator.annotate(scene=annotated_frame, detections=display_detections)
++            annotated_frame = label_annotator.annotate(
++                scene=annotated_frame, detections=display_detections,
++                labels=[str(tid) for tid in display_detections.tracker_id]
++            )
++        
++        last_annotated_frame_cache = annotated_frame
++        return annotated_frame
++
++    if last_annotated_frame_cache is not None:
++        return last_annotated_frame_cache
++    return frame.copy() # Fallback for initial frames if nothing cached yet
++
++
++def main():
++    """Main function to set up and run the video processing."""
++    # Ensure vcap is opened (it's defined globally)
++    if not vcap.isOpened():
++        print(f"Re-opening video capture for: {VIDEO_PATH}")
++        vcap.open(VIDEO_PATH) # cv2.VideoCapture(VIDEO_PATH)
++        if not vcap.isOpened():
++            raise IOError(f"Error: Could not open video: {VIDEO_PATH}")
++        vcap.set(cv2.CAP_PROP_POS_FRAMES, 0) # Reset if re-opened
++
++    process_start_time = time.time()
++
++    sv.process_video(
++        source_path=VIDEO_PATH,
++        target_path=OUTPUT_VIDEO_PATH,
++        callback=callback
++    )
++
++    if progress_bar_instance:
++        progress_bar_instance.close()
++
++    if vcap.isOpened():
++        vcap.release()
++
++    total_processing_time = time.time() - process_start_time
++    print(f"\nTotal processing time: {total_processing_time:.2f} seconds")
++    print(f"Output video saved to: {OUTPUT_VIDEO_PATH}")
++
++
++if __name__ == "__main__":
++    # Initialize video capture here to make 'vcap' available globally for the callback's progress bar
++    vcap = cv2.VideoCapture(VIDEO_PATH)
++    if not vcap.isOpened():
++        raise IOError(f"Unable to read video frames from: {VIDEO_PATH} at script start.")
++    vcap.set(cv2.CAP_PROP_ORIENTATION_AUTO, 1)
++    ok_frame, _ = vcap.read() # Read one frame to confirm
++    if not ok_frame:
++        vcap.release()
++        raise IOError(f"Unable to read first frame from: {VIDEO_PATH} at script start.")
++    vcap.set(cv2.CAP_PROP_POS_FRAMES, 0) # Reset to start for sv.process_video
++
++    main()
+\ No newline at end of file
