@@ -32,3 +32,11 @@ Put everything in the same path.
     ├── requirements.txt
     ├── util.py
     └── README.md
+
+# References:
+- fine-tune git: https://github.com/woctezuma/finetune-detr
+- detr: https://github.com/facebookresearch/detr
+- fine-tune rtdetr:
+    - https://github.com/huggingface/transformers/tree/main/examples/pytorch/object-detection
+    - https://github.com/NielsRogge/Transformers-Tutorials/tree/master/RT-DETR
+- rf-detr: https://github.com/roboflow/rf-detr
