@@ -12,6 +12,8 @@ if in jupyter:
 
     pip install ipykernel
 
+follow `all.ipynb`
+
 ## Files
 Put everything in the same path.
 
