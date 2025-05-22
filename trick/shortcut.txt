@@ -1,0 +1,2 @@
+# offline running, server on while pc off
+nohup python3 putr.py > your_script.log 2>&1 & disown
