@@ -13,6 +13,11 @@
   - video2map: multi-camera tracking and mapping into 2D
 
 
-## packages
+# packages
 
   - func: a folder containing all useful packages manually built focusing in cv, nlp, sklearn, np, hf...
+
+
+# useful short-cut
+
+  - trick
