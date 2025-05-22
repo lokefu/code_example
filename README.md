@@ -6,6 +6,8 @@
 
   - frame_diff: video object detection via frame differencing
 
+  - jetson: deploy edge device (nvidia jetson nano orin)
+
   - object_detect: bounding box detection via fine-tuning DETR
 
   - table_ocr: table recognition + OCR from PDF/Image
