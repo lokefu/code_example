@@ -10,6 +10,8 @@
 
   - object_detect: bounding box detection via fine-tuning DETR
 
+  - object_tracking: object tracking algorithm implementation
+
   - table_ocr: table recognition + OCR from PDF/Image
 
   - video2map: multi-camera tracking and mapping into 2D
