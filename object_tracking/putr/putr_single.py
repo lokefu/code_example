@@ -20,41 +20,33 @@ from utils.utils import distributed_rank
 
 
 #------- input & output -------#
-###### only 4 variables need to be changed: boolean video_nested, json, video, output_dir
-video_folders_nested = False
-# Specify whether the video folders are nested, i.e.,
-'''
--raw
-    -March 1
-        -video1.mp4
-    -March 2
-'''
+###### only 3 varibales need to be changed: json, video, output_folder
+all_detections_path = '/mnt/iora/batch-1/processed/Copy of A iORA Isetan CHANNEL  6  9 MAR 2025 (1100-2330).json'
+video_path = '/mnt/iora/batch-1/raw/March 9/Copy of A iORA Isetan CHANNEL  6  9 MAR 2025 (1100-2330).mp4'
 
-#video_folders_path = '/mnt/iora/batch-1/raw/' #this is nested
-video_folders_path = '/mnt/iora/batch-1/raw/March 2/'
-json_folder_path = '/mnt/iora/batch-1/processed/'
-output_folder = '/home/jupyter/iora_output_batch/'
+#video_path = '/home/jupyter/test/PuTR/output/Copy of A iORA Isetan CHANNEL  3  (1100-2330)      1 MAR 2025_segment_1.mp4'
+#all_detections_path = '/home/jupyter/test/PuTR/output/Copy of A iORA Isetan CHANNEL  3  (1100-2330)      1 MAR 2025_segment_1.json'
 
+output_folder = '/home/jupyter/iora_output_single/' 
+if not os.path.exists(output_folder):
+    os.makedirs(output_folder)
+
+# put separate json and video path output here in case that's desired
+# if so, can direclty change
+
+file_name_with_extension = os.path.basename(all_detections_path)
+name_stem, extension = os.path.splitext(file_name_with_extension)
+video_output_path = os.path.join(output_folder, name_stem) + '.mp4'
+json_output_path = os.path.join(output_folder, name_stem) + '.json'
 
 #output folder, format like
 '''
--iora_putr_output
-    -json
-        -video1.json
-    -vis
-        -video1.mp4
+-output_test_final
+    -result.json
+    -vis.mp4
     -log.txt (log file)
     -log.json (fps+)
 '''
-
-# Create the output directory if it doesn't exist
-if not os.path.exists(output_folder):
-    os.makedirs(output_folder)
-# create subfolders for json and vis
-if not os.path.exists(os.path.join(output_folder, 'json/')):
-    os.makedirs(os.path.join(output_folder, 'json/'))
-if not os.path.exists(os.path.join(output_folder, 'vis/')):
-    os.makedirs(os.path.join(output_folder, 'vis/'))
 
 # write log
 output_log_path = output_folder + "log.txt"
@@ -105,7 +97,7 @@ class Submitter:
 
         # Create output video file if visualization is enabled
         if self.visualize:
-            output_video_path = os.path.join(self.outputs_dir, os.path.basename(video_path))
+            output_video_path = video_output_path
             output_video = cv2.VideoWriter(
                 output_video_path,
                 cv2.VideoWriter_fourcc(*'mp4v'),
@@ -135,7 +127,7 @@ class Submitter:
                 # load the detections
                 detections = self.detection[str(i)]
                 frame_torch = torch.from_numpy(frame).unsqueeze(0).to(self.device)
-                
+                #print(frame_torch)
                 det_bboxes = np.array(detections['boxes']).astype(np.float32)
                 det_scores = np.array(detections['scores']).astype(np.float32)
                 det_labels = np.ones(len(detections['scores']), dtype=int)
@@ -157,17 +149,19 @@ class Submitter:
                                         torch.tensor(det_labels, device=self.device).unsqueeze(1)],
                                         dim=1)
                 det_bboxes = det_bboxes.to(self.device)
-
+                #print(det_bboxes)
                 # Process detections and tracking
                 trks = self.tracker.update(frame_torch, det_bboxes, det_bboxes)
+                #print(trks)
                 trks = trks.cpu().numpy()
+                #print(trks)
 
                 dets = trks[:, TI.TLBR:TI.TLBR + 4].astype("int32")
                 trk_ids = trks[:, TI.TrackID].astype("int32")
 
                 # Add to frame_to_tracks dictionary
                 frame_to_tracks[i] = {trk_id: det.tolist() for trk_id, det in zip(trk_ids, dets)}
-                
+                #print(f"Frame {i}: {frame_to_tracks[i]}")
                 end_time = time.time()
                 time_per_frame.append(end_time - start_time)
                 
@@ -266,21 +260,18 @@ def load(path):
     with open(path, 'r') as json_file:
         return json.load(json_file)
 
-def all_combine_batch(video_path, all_detections, output_dir):
+def all_combine(video_path, detections, output_dir):
     #all_detections = load(all_detections_path)
-    vis_output_dir = os.path.join(output_dir, 'vis/')
     submitter = Submitter(
         config=config,
         dataset_name=video_path,
-        outputs_dir=vis_output_dir,
+        outputs_dir=output_dir,
         model=model,
-        all_detections=all_detections,
+        all_detections=detections,
     )
     track_list = submitter.run()
     output = convert_output(track_list)
-    json_output_dir = os.path.join(output_dir, 'json/')
-    output_tracking_path = os.path.join(json_output_dir, os.path.basename(all_detections_path))
-    save(output_tracking_path, output)
+    save(json_output_path, output)
     return output
 
 
@@ -308,133 +299,23 @@ def convert_output(track_list):
 
     return output_data
 
-#get video and json path
-def get_folder_names(path):
-  """
-  Gets the names of all folders (directories) directly inside a given path.
 
-  Args:
-    path (str): The path to the directory to list.
-
-  Returns:
-    list: A list of strings, where each string is the name of a folder
-          found directly inside the given path. Returns an empty list
-          if the path does not exist, is not a directory, or contains
-          no subdirectories.
-  """
-  folder_names = []
-  
-  # Check if the provided path exists and is a directory
-  if not os.path.isdir(path):
-    print(f"Error: Path '{path}' does not exist or is not a directory.")
-    return []
-
-  # List all entries (files and directories) in the path
-  entries = os.listdir(path)
-
-  # Iterate through the entries
-  for entry_name in entries:
-    # Construct the full path for the entry
-    full_path = os.path.join(path, entry_name)
+#------- run -------#
+print(video_path)
+print(all_detections_path)
     
-    # Check if the entry is a directory
-    if os.path.isdir(full_path):
-      # If it's a directory, add its name to our list
-      folder_names.append(entry_name)
-      
-  return folder_names
+# write log
+with open(output_log_path, 'a') as f:
+    # Use the .write() method to write the string to the file
+    result_string = f"Processing video: {video_path}\n"
+    result_string += f"Processing json: {all_detections_path}\n"
+    result_string += f"\n"
+    # Write the string to the file
+    f.write(result_string)
 
-def get_files_with_ending_in_folder(path, ending):
-  """
-  Gets the names of all files ending with .mp4 directly inside a given path.
-
-  Args:
-    path (str): The path to the directory to search within.
-
-  Returns:
-    list: A list of strings, where each string is the name of an .mp4 file
-          found directly inside the given path. Returns an empty list
-          if the path does not exist, is not a directory, or contains
-          no .mp4 files directly within it.
-  """
-  files = []
-  target_extension = ending
-
-  # Check if the provided path exists and is a directory
-  if not os.path.isdir(path):
-    print(f"Error: Path '{path}' does not exist or is not a directory.")
-    return []
-
-  # List all entries (files and directories) in the path
-  entries = os.listdir(path)
-
-  # Iterate through the entries
-  for entry_name in entries:
-    # Construct the full path for the entry
-    full_path = os.path.join(path, entry_name)
-
-    # Check if the entry is a file AND if its name ends with the target extension
-    # We use .lower() to handle both .mp4 and .MP4 case extensions
-    if os.path.isfile(full_path) and entry_name.lower().endswith(target_extension):
-      # If it's a file ending with .mp4, add its name to our list
-      files.append(entry_name)
-
-  return files
-
-
-#------- prepare input -------#
-# Check if the folders are nested
-if video_folders_nested:
-    video_folder_list = get_folder_names(video_folders_path)
-    video_folder_list_path = [video_folders_path + video_folder + '/' for video_folder in video_folder_list]
-
-    video_list = []
-    for video_folder in video_folder_list_path:
-        video_files = get_files_with_ending_in_folder(video_folder, '.mp4')
-        for video_file in video_files:  
-            video_file_path = video_folder + video_file
-            video_list.append([video_file_path, video_file])
-else:
-    video_list = []
-    video_files = get_files_with_ending_in_folder(video_folders_path, '.mp4')
-    for video_file in video_files:  
-        video_file_path = video_folders_path + video_file
-        video_list.append([video_file_path, video_file])
-    print(video_list)
-
-video_json_pair_list = []
-for video_file in video_list:
-    video_file_path = video_file[0]
-    video_file_name = video_file[1]
-    json_file_name = video_file_name.replace('.mp4', f'.json')
-    json_file_path = os.path.join(json_folder_path, json_file_name)
-    if os.path.exists(json_file_path):
-        video_json_pair_list.append([video_file_path, json_file_path])
-    else:
-        print(f"Warning: JSON file '{json_file_path}' does not exist for video '{video_file_path}'. Skipping this video.")
-        continue
-
-
-#------- run batch -------#
-for video_json_pair in video_json_pair_list:
-    video_path = video_json_pair[0]
-    all_detections_path = video_json_pair[1]
-    print(video_path)
-    print(all_detections_path)
-    
-    # write log
-    with open(output_log_path, 'a') as f:
-        # Use the .write() method to write the string to the file
-        result_string = f"Processing video: {video_path}\n"
-        result_string += f"Processing json: {all_detections_path}\n"
-        result_string += f"\n"
-        # Write the string to the file
-        f.write(result_string)
-    
-    # feed detections only into the model
-    all_detections = load(all_detections_path)
-    detections = all_detections['frames']
-    output = all_combine_batch(video_path, detections, output_folder)
+all_detections = load(all_detections_path)
+detections = all_detections['frames']
+output = all_combine(video_path, detections, output_folder)
 
 save(output_log_json, log_dict)
 print(f"Successfully wrote results to {output_log_json}")
