@@ -25,7 +25,7 @@ pip install opencv-python lap
 
 ## Files
 - pure.py                     # do tracking with rfdetr as detection model
-- pure_with_det.py            # do tracking with your own det (skip zero/non detection frames)
+- pure_single.py            # do tracking with your own det (skip zero/non detection frames)
 - pure_batch.py               # do batch tracking with your own det (skip)
 
 ## Inputs Format to PuTR
