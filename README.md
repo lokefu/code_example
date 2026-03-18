@@ -2,7 +2,7 @@
 
   - PDF: information (text, table, ...) extraction from PDF
 
-  - RAG: chatbot based on existing data via RAG + LLM
+  - RAG: chatbot based on existing data via RAG + LLM; featuring Hybrid Search & LangGraph-based RAG workflow
 
   - frame_diff: video object detection via frame differencing
 
