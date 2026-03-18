@@ -4,7 +4,7 @@ To build intelligence chat/search bot, using RAG on existing data
 # Background
 1. Singapore National Park Biodiversity, Chatbot for animals' information
 2. RAG + LLM
-3. Framework: Langchain
+3. Framework: LangGraph
 4. Text encoder/Embedding model:
 
         # semantic:
@@ -13,8 +13,9 @@ To build intelligence chat/search bot, using RAG on existing data
 
         # latin:
         jinaai/jina-embeddings-v3
-6. Vector Database: FAISS
+6. Vector Database: FAISS/others
 7. LLM: mistralai/Mistral-7B-Instruct-v0.3
+8. Architected a complex RAG Agent using LangGraph to orchestrate a modular AI workflow, integrating Multi-Query Expansion, Hybrid Ensemble Retrieval (Jina & MPNet), and Flashrank Reranking to boost document relevance and minimize hallucinations in Mistral-7B responses.
 
 
 # Demo
@@ -42,7 +43,7 @@ Put everything in the same path.
     ├── animal_data.json        # data from web  
     ├── dropdown.pkl            # data for dropdown
     ├── animal_list.pkl         # data for animal list
-    ├── demo.py
+    ├── rag_demo.py
     ├── requirements.txt
     └── README.md
 
@@ -59,7 +60,7 @@ Put everything in the same path.
         snapshot_download(repo_id="mistralai/Mistral-7B-Instruct-v0.3", allow_patterns=["params.json", "consolidated.safetensors", "tokenizer.model.v3"], local_dir=mistral_models_path)
 
 ## Run
-python3 demo.py
+python3 rag_demo.py
 
 # Remarks
 1. Will add the dropdown into demo later.
